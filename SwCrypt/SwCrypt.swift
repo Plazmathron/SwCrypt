@@ -1308,6 +1308,7 @@ open class CC {
 		}
 
 		fileprivate static func add_pss_padding(_ digest: DigestAlgorithm,
+                                                mgf1Digest: DigestAlgorithm = .sha1,
 												saltLength: Int,
 												keyLength: Int,
 												message: Data) throws -> Data {
@@ -1341,7 +1342,7 @@ open class CC {
 			var db = padding
 			db.append([0x01] as [UInt8], count: 1)
 			db.append(salt)
-			let dbMask = mgf1(digest, seed: mPrimeHash, maskLength: emLength - hash.count - 1)
+			let dbMask = mgf1(mgf1Digest, seed: mPrimeHash, maskLength: emLength - hash.count - 1)
 			var maskedDB = xorData(db, dbMask)
 
 			let zeroBits = 8 * emLength - emBits
@@ -1356,6 +1357,7 @@ open class CC {
 		}
 
 		fileprivate static func verify_pss_padding(_ digest: DigestAlgorithm,
+                                                   mgf1Digest: DigestAlgorithm = .sha1,
 												   saltLength: Int, keyLength: Int,
 												   message: Data,
 												   encMessage: Data) throws -> Bool {
@@ -1389,7 +1391,7 @@ open class CC {
 				return false
 			}
 			let mPrimeHash = encMessage.subdata(in: maskedDBLength ..< maskedDBLength + hash.count)
-			let dbMask = mgf1(digest, seed: mPrimeHash, maskLength: emLength - hash.count - 1)
+			let dbMask = mgf1(mgf1Digest, seed: mPrimeHash, maskLength: emLength - hash.count - 1)
 			var db = xorData(maskedDB, dbMask)
 			db.withUnsafeMutableBytes { dbBytes in
 				dbBytes[0] &= UInt8(0xff >> zeroBits)
