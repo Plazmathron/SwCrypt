@@ -1246,6 +1246,58 @@ open class CC {
 			}
 		}
 
+        public static func UNSAFE_pss_sign(_ message: Data, derKey: Data,
+                                           digest: (Data) -> Data, mgf1Digest: DigestAlgorithm = .sha1,
+                                           saltLen: Int) throws -> Data {
+            let key = try importFromDERKey(derKey)
+            defer { CCRSACryptorRelease!(key) }
+            guard getKeyType(key) == .privateKey else { throw CCError(.paramError) }
+            
+            let keySize = getKeySize(key)
+            
+            if keySize < 16 || saltLen < 0 {
+                throw CCError(.paramError)
+            }
+            
+            // The maximal bit size of a non-negative integer is one less than the bit
+            // size of the key since the first bit is used to store sign
+            let emBits = keySize * 8 - 1
+            var emLength = emBits / 8
+            if emBits % 8 != 0 {
+                emLength += 1
+            }
+            
+            let hash = digest(message)
+            
+            if emLength < hash.count + saltLen + 2 {
+                throw CCError(.paramError)
+            }
+            
+            let salt = CC.generateRandom(saltLen)
+            
+            var mPrime = Data(count: 8)
+            mPrime.append(hash)
+            mPrime.append(salt)
+            let mPrimeHash = digest(mPrime)
+            
+            let padding = Data(count: emLength - saltLen - hash.count - 2)
+            var db = padding
+            db.append([0x01] as [UInt8], count: 1)
+            db.append(salt)
+            let dbMask = mgf1(mgf1Digest, seed: mPrimeHash, maskLength: emLength - hash.count - 1)
+            var maskedDB = xorData(db, dbMask)
+            
+            let zeroBits = 8 * emLength - emBits
+            maskedDB.withUnsafeMutableBytes { maskedDBBytes in
+                maskedDBBytes[0] &= UInt8(0xff >> zeroBits)
+            }
+            
+            var ret = maskedDB
+            ret.append(mPrimeHash)
+            ret.append([0xBC] as [UInt8], count: 1)
+            return ret
+        }
+        
 		fileprivate static func crypt(_ data: Data, key: CCRSACryptorRef) throws -> Data {
 			var outLength = data.count
 			var out = Data(count: outLength)
@@ -1416,7 +1468,73 @@ open class CC {
 			return true
 		}
 
-
+        public static func UNSAFE_pss_verify(_ message: Data, derKey: Data, digest: (Data) -> Data,
+                                             mgf1Digest: DigestAlgorithm = .sha1,
+                                             saltLen: Int, signedData: Data ) throws -> Bool {
+            
+            let key = try importFromDERKey(derKey)
+            defer { CCRSACryptorRelease!(key) }
+            guard getKeyType(key) == .publicKey else { throw CCError(.paramError) }
+            
+            let keySize = getKeySize(key)
+            
+            let encoded = try crypt(signedData, key:key)
+            
+            if keySize < 16 || saltLen < 0 {
+                throw CCError(.paramError)
+            }
+            
+            guard encoded.count > 0 else {
+                return false
+            }
+            
+            let emBits = keySize * 8 - 1
+            var emLength = emBits / 8
+            if emBits % 8 != 0 {
+                emLength += 1
+            }
+            
+            let hash = digest(message)
+            
+            if emLength < hash.count + saltLen + 2 {
+                return false
+            }
+            if encoded.bytesView[encoded.count-1] != 0xBC {
+                return false
+            }
+            let zeroBits = 8 * emLength - emBits
+            let zeroBitsM = 8 - zeroBits
+            let maskedDBLength = emLength - hash.count - 1
+            let maskedDB = encoded.subdata(in: 0..<maskedDBLength)
+            if Int(maskedDB.bytesView[0]) >> zeroBitsM != 0 {
+                return false
+            }
+            let mPrimeHash = encoded.subdata(in: maskedDBLength ..< maskedDBLength + hash.count)
+            let dbMask = mgf1(mgf1Digest, seed: mPrimeHash, maskLength: emLength - hash.count - 1)
+            var db = xorData(maskedDB, dbMask)
+            db.withUnsafeMutableBytes { dbBytes in
+                dbBytes[0] &= UInt8(0xff >> zeroBits)
+            }
+            
+            let zeroLength = emLength - hash.count - saltLen - 2
+            let zeroString = Data(count:zeroLength)
+            if db.subdata(in: 0 ..< zeroLength) != zeroString {
+                return false
+            }
+            if db.bytesView[zeroLength] != 0x01 {
+                return false
+            }
+            let salt = db.subdata(in: (db.count - saltLen) ..< db.count)
+            var mPrime = Data(count:8)
+            mPrime.append(hash)
+            mPrime.append(salt)
+            let mPrimeHash2 = digest(mPrime)
+            if mPrimeHash != mPrimeHash2 {
+                return false
+            }
+            return true
+        }
+        
 		public static func available() -> Bool {
 			return CCRSACryptorGeneratePair != nil &&
 				CCRSACryptorGetPublicKeyFromPrivateKey != nil &&
