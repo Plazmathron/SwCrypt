@@ -1292,10 +1292,11 @@ open class CC {
                 maskedDBBytes[0] &= UInt8(0xff >> zeroBits)
             }
             
-            var ret = maskedDB
-            ret.append(mPrimeHash)
-            ret.append([0xBC] as [UInt8], count: 1)
-            return ret
+            var encMessage = maskedDB
+            encMessage.append(mPrimeHash)
+            encMessage.append([0xBC] as [UInt8], count: 1)
+            
+            return try crypt(encMessage, key: key)
         }
         
 		fileprivate static func crypt(_ data: Data, key: CCRSACryptorRef) throws -> Data {
