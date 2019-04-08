@@ -1400,7 +1400,7 @@ open class CC {
 
 			let zeroBits = 8 * emLength - emBits
 			maskedDB.withUnsafeMutableBytes { maskedDBBytes in
-				maskedDBBytes[0] &= UInt8(0xff >> zeroBits)
+				maskedDBBytes[0] &= 0xff >> UInt8(zeroBits)
 			}
 
 			var ret = maskedDB
@@ -1447,7 +1447,7 @@ open class CC {
 			let dbMask = mgf1(mgf1Digest, seed: mPrimeHash, maskLength: emLength - hash.count - 1)
 			var db = xorData(maskedDB, dbMask)
 			db.withUnsafeMutableBytes { dbBytes in
-				dbBytes[0] &= UInt8(0xff >> zeroBits)
+				dbBytes[0] &= 0xff >> UInt8(zeroBits)
 			}
 
 			let zeroLength = emLength - hash.count - saltLength - 2
